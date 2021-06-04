@@ -10,3 +10,8 @@ compile_commands.json
 CTestTestfile.cmake
 _deps
 webserver-files/.vscode/settings.json
+webserver-files/*.o
+webserver-files/public/
+webserv-singlethreaded/*.o
+webserv-singlethreaded/public/
+.vscode/settings.json
