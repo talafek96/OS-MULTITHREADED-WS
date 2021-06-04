@@ -1,4 +1,8 @@
 #include "connection.h"
+#define CONN_DEBUG 1
+#if CONN_DEBUG == 1
+#include <assert.h>
+#endif
 
 struct connection_list
 {
@@ -62,6 +66,8 @@ ConnectionList connCreateList()
     list->head = head;
     list->tail = tail;
     list->size = 0;
+
+    return list;
 }
 
 void connDestroyList(ConnectionList list)
@@ -70,8 +76,12 @@ void connDestroyList(ConnectionList list)
     {
         return;
     }
+
+    #if CONN_DEBUG == 1
     assert(list->head != NULL);
     assert(list->tail != NULL);
+    #endif
+
     if(list->size > 0 && list->head->next != list->tail)
     {
         c_node it = list->head->next;
@@ -89,8 +99,11 @@ void connDestroyList(ConnectionList list)
 
 ConnectionRes connPushHead(ConnectionList list, ConnectionStruct info)
 {
+    #if CONN_DEBUG == 1
     assert(list);
     assert(info);
+    #endif
+
     ConnectionStruct entry = malloc(sizeof(*entry));
     c_node new_node = malloc(sizeof(*new_node));
 
@@ -112,10 +125,13 @@ ConnectionRes connPushHead(ConnectionList list, ConnectionStruct info)
     return CONNECTION_SUCCESS;
 }
 
-ConnectionRes connPopHead(ConnectionList list, int to_free)
+ConnectionRes connPopHead(ConnectionList list, bool to_free)
 {
+    #if CONN_DEBUG == 1
     assert(list);
     assert(list->size >= 0);
+    #endif
+
     if(list->size == 0)
     {
         return CONNECTION_EMPTY;
@@ -134,8 +150,11 @@ ConnectionRes connPopHead(ConnectionList list, int to_free)
 
 ConnectionRes connPushTail(ConnectionList list, ConnectionStruct info)
 {
+    #if CONN_DEBUG == 1
     assert(list);
     assert(info);
+    #endif
+
     ConnectionStruct entry = malloc(sizeof(*entry));
     c_node new_node = malloc(sizeof(*new_node));
 
@@ -157,10 +176,13 @@ ConnectionRes connPushTail(ConnectionList list, ConnectionStruct info)
     return CONNECTION_SUCCESS;
 }
 
-ConnectionRes connPopTail(ConnectionList list, int to_free)
+ConnectionRes connPopTail(ConnectionList list, bool to_free)
 {
+    #if CONN_DEBUG == 1
     assert(list);
     assert(list->size >= 0);
+    #endif
+
     if(list->size == 0)
     {
         return CONNECTION_EMPTY;
@@ -182,8 +204,11 @@ ConnectionRes connPopTail(ConnectionList list, int to_free)
  */ 
 static c_node connGetNodeById(ConnectionList list, int job_id)
 {
+    #if CONN_DEBUG == 1
     assert(list != NULL);
     assert(list->size >= 0);
+    #endif
+
     if(list->size == 0)
     {
         return NULL;
@@ -227,30 +252,39 @@ ConnectionStruct connGetById(ConnectionList list, int job_id)
 
 ConnectionStruct connGetFirst(ConnectionList list)
 {
+    #if CONN_DEBUG == 1
     assert(list);
     assert(list->size >= 0);
+    #endif
+
     if(list->size == 0)
     {
         return NULL;
     }
-    return list->head->next;
+    return list->head->next->info;
 }
 
 ConnectionStruct connGetLast(ConnectionList list)
 {
+    #if CONN_DEBUG == 1
     assert(list);
     assert(list->size >= 0);
+    #endif
+
     if(list->size == 0)
     {
         return NULL;
     }
-    return list->tail->prev;
+    return list->tail->prev->info;
 }
 
 int connGetSize(ConnectionList list)
 {
+    #if CONN_DEBUG == 1
     assert(list);
     assert(list->size >= 0);
+    #endif
+
     return list->size;
 }
 
@@ -289,7 +323,34 @@ ParallelQ parallelCreateQueue()
     queue->list = list;
     queue->global_m = global_m;
     queue->cond = cond;
+    return queue;
 }
+
+bool parallelDestroyQueue(ParallelQ queue)
+{
+    if(pthread_cond_destroy(queue->cond) == 0)
+    {
+        return false;
+    }
+    if(pthread_mutex_destroy(queue->global_m) == 0)
+    {
+        pthread_cond_init(queue->cond, NULL);
+        return false;
+    }
+    free(queue->cond);
+    free(queue->global_m);
+    connDestroyList(queue->list);
+    return true;
+}
+
+/*
+struct parallel_q
+{
+    ConnectionList list;
+    pthread_mutex_t* global_m;
+    pthread_cond_t* cond;
+};
+*/
 
 ConnectionRes parallelEnqueue(ParallelQ queue, ConnectionStruct info)
 {
