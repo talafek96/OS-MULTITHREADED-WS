@@ -15,3 +15,5 @@ webserver-files/public/
 webserv-singlethreaded/*.o
 webserv-singlethreaded/public/
 .vscode/settings.json
+*.json
+/build/
