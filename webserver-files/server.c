@@ -137,6 +137,7 @@ int main(int argc, char *argv[])
             }
         }
     }
+
     int job_id = 0;
     while (1) 
     {
@@ -183,12 +184,35 @@ int main(int argc, char *argv[])
 
 void* threadDoWork(void* args)
 {
-    // requestHandle(connfd); Close(connfd);
+    ConnectionStruct res = NULL;
+    ThreadArgs t_args = *((ThreadArgs*)args);
+    while(1)
+    {
+        pthread_mutex_lock(&global_m);
+        while(connGetSize(t_args.to_do_list) == 0)
+        {
+            pthread_cond_wait(&cond, &global_m);
+        }
+        // <CRITICAL>
+        // Pull the request from the to do list:
+        res = connGetFirst(t_args.to_do_list);
+        connPopHead(t_args.to_do_list, false);
+        // Push the request to the busy list, embedded with the dispatch time:
+        gettimeofday(&(res->dispatch), NULL); // This function is obsolete, better to use clock_gettime instead.
+        connPushHead(t_args.busy_list, res);
+        // <CRITICAL-END>
+        pthread_mutex_unlock(&global_m);
+
+        requestHandle(res->connfd); // PROCESS THE REQUEST.
+        Close(res->connfd);
+        // TODO: Add statistics processing.
+        
+        pthread_mutex_lock(&global_m);
+        // <CRITICAL>
+        connRemoveById(t_args.busy_list, res->job_id);
+        // <CRITICAL-END>
+        pthread_mutex_unlock(&global_m);
+    }
+    
     return NULL;
 }
-
-
-    
-
-
- 
