@@ -19,6 +19,7 @@
 // Global mutex lock and condition variables:
 pthread_mutex_t global_m;
 pthread_cond_t  cond;
+pthread_cond_t  cond_policy;
 // ******************************************//
 // Struct to pass arguments to the thread_do_work routine handler:
 typedef struct thread_args
@@ -33,10 +34,14 @@ typedef struct thread_args
 
 void checkValidity(int port, int threads_num, int queue_size, char *argv[]);
 void* threadDoWork(void* args);
-void blockPolicy(ConnectionList to_do_list, ConnectionList busy_list);
-void dhPolicy(ConnectionList to_do_list, ConnectionList busy_list);
-void dtPolicy(ConnectionList to_do_list, ConnectionList busy_list);
-void randomPolicy(ConnectionList to_do_list, ConnectionList busy_list);
+void blockPolicy(ConnectionList to_do_list, ConnectionList busy_list, int q_size, int connfd, bool* skip_full_flag);
+void dhPolicy(ConnectionList to_do_list, ConnectionList busy_list, int q_size, int connfd, bool* skip_full_flag);
+void dtPolicy(ConnectionList to_do_list, ConnectionList busy_list, int q_size, int connfd, bool* skip_full_flag);
+void randomPolicy(ConnectionList to_do_list, ConnectionList busy_list, int q_size, int connfd, bool* skip_full_flag);
+
+static int randInt(int max);
+static int myCeil(double num);
+
 
 // TODO: Parse the new arguments too
 void getargs(int *port, int *threads_num, int *q_size, int argc, char *argv[])
@@ -80,11 +85,12 @@ void checkValidity(int port, int threads_num, int queue_size, char *argv[])
 int main(int argc, char *argv[])
 {
     int listenfd, connfd, port, threads_num, q_size, clientlen;
+    bool skip_flag = false;
     struct sockaddr_in clientaddr;
     // to_do_list: List of requests waiting to be processed by a worker thread (buffer).
     // busy_list:  List of requests currently being worked on by a worker thread.
     ConnectionList to_do_list, busy_list;
-    void (*overloadPolicy)(ConnectionList, ConnectionList) = NULL;
+    void (*overloadPolicy)(ConnectionList, ConnectionList, int, int, bool*) = NULL;
 
     getargs(&port, &threads_num, &q_size, argc, argv);
     checkValidity(port, threads_num, q_size, argv); // If this fails the server will close.
@@ -100,6 +106,7 @@ int main(int argc, char *argv[])
     else if(!strcmp(argv[POLICY_POS], "dt"))
     {
         overloadPolicy = dtPolicy;
+        skip_flag = true;
     }
     else if(!strcmp(argv[POLICY_POS], "random"))
     {
@@ -124,8 +131,8 @@ int main(int argc, char *argv[])
     listenfd = Open_listenfd(port);
     
     // Create the worker threads:
-    pthread_t *threads = malloc(threads_num * sizeof(*threads)); // Allocate space for the thread identifiers
-    ThreadArgs *t_args = malloc(threads_num * sizeof(*t_args)); // Alocate space for the arguments of the threads
+    pthread_t *threads = (pthread_t*)malloc(threads_num * sizeof(*threads)); // Allocate space for the thread identifiers
+    ThreadArgs *t_args = (ThreadArgs*)malloc(threads_num * sizeof(*t_args)); // Alocate space for the arguments of the threads
     if(threads == NULL)
     {
         perror("Error: threads allocation failed");
@@ -170,14 +177,11 @@ int main(int argc, char *argv[])
     int job_id = 0;
     while (1) 
     {
+        bool skip_full_flag = false;
         clientlen = sizeof(clientaddr);
         connfd = Accept(listenfd, (SA *)&clientaddr, (socklen_t *) &clientlen);
-        // 
-        // TODO: In general, don't handle the request in the main thread.
-        // Save the relevant info in a buffer and have one of the worker threads 
-        // do the work. 
-        // 
-        ConnectionStruct cd = malloc(sizeof(*cd));
+        
+        ConnectionStruct cd = (ConnectionStruct)malloc(sizeof(*cd));
         if(!cd)
         {
             perror("Error: connection struct allocation fail");
@@ -188,16 +192,20 @@ int main(int argc, char *argv[])
         gettimeofday(&(cd->arrival), NULL); // This function is obsolete, better to use clock_gettime instead.
         
         pthread_mutex_lock(&global_m);
+        // <CRITICAL>
         // Make sure there is enough space in the to_do_list:
         if(connGetSize(to_do_list) + connGetSize(busy_list) + 1 > q_size)
         {
-            overloadPolicy(to_do_list, busy_list);
-            pthread_mutex_unlock(&global_m);
-            continue;
+            overloadPolicy(to_do_list, busy_list, q_size, connfd, &skip_full_flag);
+            if(skip_flag || skip_full_flag)
+            {
+                // <CRITICAL-END>
+                pthread_mutex_unlock(&global_m);
+                continue;
+            }
         }
         // If we get here, there is enough space for one more connection in the buffer (to_do_list).
         // Add the ConnectionStruct to the to_do_list:
-        // <CRITICAL>
         ConnectionRes res = connPushTail(to_do_list, cd);
         if(res == CONNECTION_OUT_OF_MEMORY)
         {
@@ -209,6 +217,25 @@ int main(int argc, char *argv[])
         // <CRITICAL-END>
         pthread_mutex_unlock(&global_m);
     }
+}
+
+static int randInt(int max)
+{
+    int res = 0;
+    static int feed = 251640;
+    srand(time(NULL)*(++feed));
+    res = (rand()*feed) % (max + 1);
+    return abs(res);
+}
+
+static int myCeil(double num)
+{
+    int inum = (int)num;
+    if((double)inum == num)
+    {
+        return inum;
+    }
+    return num + 1;
 }
 
 void* threadDoWork(void* args)
@@ -239,6 +266,7 @@ void* threadDoWork(void* args)
         pthread_mutex_lock(&global_m);
         // <CRITICAL>
         connRemoveById(t_args.busy_list, res->job_id);
+        pthread_cond_signal(&cond_policy);
         // <CRITICAL-END>
         pthread_mutex_unlock(&global_m);
     }
@@ -247,15 +275,54 @@ void* threadDoWork(void* args)
 }
 
 // ***** Block Policy ***** //
-
+void blockPolicy(ConnectionList to_do_list, ConnectionList busy_list, int q_size, int connfd, bool* skip_full_flag)
+{
+    while(connGetSize(to_do_list) + connGetSize(busy_list) + 1 > q_size)
+    {
+        pthread_cond_wait(&cond_policy, &global_m);
+    }
+}
 
 // ****** DH Policy ****** //
-
+void dhPolicy(ConnectionList to_do_list, ConnectionList busy_list, int q_size, int connfd, bool* skip_full_flag)
+{
+    if(connGetSize(to_do_list) == 0)
+    {
+        Close(connfd);
+        *skip_full_flag = true;
+        return;
+    }
+    connPopTail(to_do_list, true);
+}
 
 // ****** DT Policy ****** //
-
+void dtPolicy(ConnectionList to_do_list, ConnectionList busy_list, int q_size, int connfd, bool* skip_full_flag)
+{
+    Close(connfd);   
+}
 
 // **** Random Policy **** //
+void randomPolicy(ConnectionList to_do_list, ConnectionList busy_list, int q_size, int connfd, bool* skip_full_flag)
+{
+    int size = connGetSize(to_do_list);
+    int to_remove = myCeil((double)size/4);
+    
+    if(size == 0)
+    {
+        Close(connfd);
+        *skip_full_flag = true;
+        return;
+    }
 
-
+    int rand_index = 0;
+    int job_id = -1;
+    while(to_remove)
+    {
+        rand_index = randInt(size-1);
+        job_id = connGetIthElement(to_do_list, rand_index)->job_id;
+        connRemoveById(to_do_list, job_id);
+        size--;
+        to_remove--;
+    }
+}
 // *********************** //
