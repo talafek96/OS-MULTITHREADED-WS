@@ -285,6 +285,27 @@ ConnectionStruct connGetLast(ConnectionList list)
     return list->tail->prev->info;
 }
 
+ConnectionStruct connGetIthElement(ConnectionList list, int index)
+{
+    #if CONN_DEBUG == 1
+    assert(list);
+    assert(list->size >= 0);
+    #endif
+
+    if(index + 1 >= list->size)
+    {
+        return NULL;
+    }
+
+    c_node curr = list->head->next;
+    while(index)
+    {
+        curr = curr->next;
+        index--;
+    }
+    return curr->info;
+}
+
 int connGetSize(ConnectionList list)
 {
     #if CONN_DEBUG == 1

@@ -46,7 +46,7 @@ ConnectionRes connPushHead(ConnectionList list, ConnectionStruct info);
 
 /**
  * Pop an entry from the head of the list.
- * Return CONNECTION_EMPTY if allocation fails,
+ * Return CONNECTION_EMPTY if the list is empty,
  * Otherwise return CONNECTION_SUCCESS. 
  */
 ConnectionRes connPopHead(ConnectionList list, bool to_free);
@@ -60,7 +60,7 @@ ConnectionRes connPushTail(ConnectionList list, ConnectionStruct info);
 
 /**
  * Pop an entry from the tail of the list.
- * Return CONNECTION_EMPTY if allocation fails,
+ * Return CONNECTION_EMPTY if the list is empty,
  * Otherwise return CONNECTION_SUCCESS. 
  */
 ConnectionRes connPopTail(ConnectionList list, bool to_free);
@@ -88,6 +88,12 @@ ConnectionStruct connGetFirst(ConnectionList list);
  * Return NULL if the list is empty.
  */
 ConnectionStruct connGetLast(ConnectionList list);
+
+/**
+ * Get a reference to the i'th element from the beginning of the list (Head).
+ * Return NULL if index is greater than the number of elements in the list.
+ */ 
+ConnectionStruct connGetIthElement(ConnectionList list, int index);
 
 /**
  * Return the size of the list.
