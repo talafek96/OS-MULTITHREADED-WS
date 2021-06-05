@@ -120,6 +120,8 @@ ConnectionRes connPushHead(ConnectionList list, ConnectionStruct info)
     new_node->prev = list->head;
     tmp->prev = new_node;
 
+    new_node->info = entry;
+
     list->size++; // Inc the size of the list
 
     return CONNECTION_SUCCESS;
@@ -171,6 +173,8 @@ ConnectionRes connPushTail(ConnectionList list, ConnectionStruct info)
     new_node->next = list->tail;
     tmp->next = new_node;
 
+    new_node->info = entry;
+
     list->size++; // Inc the size of the list
 
     return CONNECTION_SUCCESS;
@@ -221,6 +225,7 @@ static c_node connGetNodeById(ConnectionList list, int job_id)
         {
             return curr;
         }
+        curr = curr->next;
     }
     return NULL;
 }
@@ -236,8 +241,10 @@ void connRemoveById(ConnectionList list, int job_id)
     c_node next = node->next;
     prev->next = next; // Update the new pointers around node.
     next->prev = prev;
-
+    
     freeNode(node);
+
+    list->size--;
 }
 
 ConnectionStruct connGetById(ConnectionList list, int job_id)
@@ -373,7 +380,7 @@ ConnectionStruct parallelDequeue(ParallelQ queue)
     }
 
     // Save the ConnectionStruct and pop from the list: <CRITICAL>
-    res = connGetById(queue->list, connGetFirst(queue->list)->job_id);
+    res = connGetFirst(queue->list);
     connPopHead(queue->list, 0);
     // <CRITICAL-END>
     pthread_mutex_unlock(queue->global_m);
