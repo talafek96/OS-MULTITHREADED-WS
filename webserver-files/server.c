@@ -3,6 +3,7 @@
 #include "connection.h"
 
 #define MIN_PORT 1025
+#define POLICY_POS 4
 
 // 
 // server.c: A very, very simple web server
@@ -32,13 +33,17 @@ typedef struct thread_args
 
 void checkValidity(int port, int threads_num, int queue_size, char *argv[]);
 void* threadDoWork(void* args);
+void blockPolicy(ConnectionList to_do_list, ConnectionList busy_list);
+void dhPolicy(ConnectionList to_do_list, ConnectionList busy_list);
+void dtPolicy(ConnectionList to_do_list, ConnectionList busy_list);
+void randomPolicy(ConnectionList to_do_list, ConnectionList busy_list);
 
 // TODO: Parse the new arguments too
 void getargs(int *port, int *threads_num, int *q_size, int argc, char *argv[])
 {
-    if (argc < 4) 
+    if (argc < 5) 
     {
-        fprintf(stderr, "Usage: %s <port> <threads> <queue-size>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <port> <threads> <queue-size> <schedalg>\n", argv[0]);
         exit(1);
     }
     *port = atoi(argv[1]);
@@ -63,6 +68,12 @@ void checkValidity(int port, int threads_num, int queue_size, char *argv[])
         fprintf(stderr, "Error: queue_size must be a positive integer.\nYou entered: %s.\n", argv[3]);
         exit(1);
     }
+    if(strcmp(argv[POLICY_POS], "block") && strcmp(argv[POLICY_POS], "dt") \
+    && strcmp(argv[POLICY_POS], "dh") && strcmp(argv[POLICY_POS], "random"))
+    {
+        fprintf(stderr, "Error: schedalg must be one of the following: block|dt|dh|random\n");
+        exit(1);
+    }
 }
 
 
@@ -73,10 +84,28 @@ int main(int argc, char *argv[])
     // to_do_list: List of requests waiting to be processed by a worker thread (buffer).
     // busy_list:  List of requests currently being worked on by a worker thread.
     ConnectionList to_do_list, busy_list;
+    void (*overloadPolicy)(ConnectionList, ConnectionList) = NULL;
 
     getargs(&port, &threads_num, &q_size, argc, argv);
     checkValidity(port, threads_num, q_size, argv); // If this fails the server will close.
 
+    if(!strcmp(argv[POLICY_POS], "block"))
+    {
+        overloadPolicy = blockPolicy;
+    }
+    else if(!strcmp(argv[POLICY_POS], "dh"))
+    {
+        overloadPolicy = dhPolicy;
+    }
+    else if(!strcmp(argv[POLICY_POS], "dt"))
+    {
+        overloadPolicy = dtPolicy;
+    }
+    else if(!strcmp(argv[POLICY_POS], "random"))
+    {
+        overloadPolicy = randomPolicy;
+    }
+    
     pthread_mutex_init(&global_m, NULL);
     pthread_cond_init(&cond, NULL);
 
@@ -162,8 +191,8 @@ int main(int argc, char *argv[])
         // Make sure there is enough space in the to_do_list:
         if(connGetSize(to_do_list) + connGetSize(busy_list) + 1 > q_size)
         {
-            // Send to overload policy
-            pthread_mutex_unlock(&global_m); // TODO: When adding the policy, move this inside the overload policy.
+            overloadPolicy(to_do_list, busy_list);
+            pthread_mutex_unlock(&global_m);
             continue;
         }
         // If we get here, there is enough space for one more connection in the buffer (to_do_list).
@@ -216,3 +245,17 @@ void* threadDoWork(void* args)
     
     return NULL;
 }
+
+// ***** Block Policy ***** //
+
+
+// ****** DH Policy ****** //
+
+
+// ****** DT Policy ****** //
+
+
+// **** Random Policy **** //
+
+
+// *********************** //
