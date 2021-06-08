@@ -4,14 +4,22 @@
 #include "segel.h"
 #include <stdbool.h>
 
-struct connection_struct
+// ******* Statistics & Structs ******** //
+typedef struct connection_struct
 {
     int connfd; // The connection fd
     int job_id; // The unique id of this connection.
     struct timeval arrival; // The time signature the task arrived to the main thread.
     struct timeval dispatch; // The time signature the task arrived to the worker thread.
-};
+} *ConnectionStruct;
 
+typedef struct thread_stats
+{
+    int thread_id;
+    int thread_count;
+    int thread_static;
+    int thread_dynamic;
+} *ThreadStats;
 
 // ********** Connection List ********** //
 typedef enum ConnectionRes_t 
@@ -22,7 +30,6 @@ typedef enum ConnectionRes_t
     CONNECTION_NOT_FOUND = 404
 } ConnectionRes;
 
-typedef struct connection_struct* ConnectionStruct;
 typedef struct _node
 {
     ConnectionStruct info;

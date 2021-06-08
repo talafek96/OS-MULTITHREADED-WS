@@ -26,7 +26,6 @@ typedef struct thread_args
 {
     ConnectionList to_do_list;
     ConnectionList busy_list;
-    int queue_size; // TODO: Check if this is necessary.
     int thread_id;
 } ThreadArgs;
 
@@ -42,8 +41,6 @@ void randomPolicy(ConnectionList to_do_list, ConnectionList busy_list, int q_siz
 static int randInt(int max);
 static int myCeil(double num);
 
-
-// TODO: Parse the new arguments too
 void getargs(int *port, int *threads_num, int *q_size, int argc, char *argv[])
 {
     if (argc < 5) 
@@ -113,9 +110,12 @@ int main(int argc, char *argv[])
         overloadPolicy = randomPolicy;
     }
     
+    // Initialize locks and condition variables:
     pthread_mutex_init(&global_m, NULL);
     pthread_cond_init(&cond, NULL);
+    pthread_cond_init(&cond_policy, NULL);
 
+    // Create the lists:
     if(!(to_do_list = connCreateList()))
     {
         perror("Error: to_do_list creation failed");
@@ -128,9 +128,10 @@ int main(int argc, char *argv[])
         return 1;
     }
     
+    // Open the listening socket:
     listenfd = Open_listenfd(port);
     
-    // Create the worker threads:
+    // Allocate threads array and args structs array:
     pthread_t *threads = (pthread_t*)malloc(threads_num * sizeof(*threads)); // Allocate space for the thread identifiers
     ThreadArgs *t_args = (ThreadArgs*)malloc(threads_num * sizeof(*t_args)); // Alocate space for the arguments of the threads
     if(threads == NULL)
@@ -149,19 +150,21 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    //  Actually create the threads:
     for(int i = 0; i < threads_num; i++)
     {
         // Insert the arguments
         t_args[i].to_do_list = to_do_list;
         t_args[i].busy_list = busy_list;
-        t_args[i].queue_size = q_size;
         t_args[i].thread_id = i;
 
         // Create the thread
         if(pthread_create(&threads[i], NULL, threadDoWork, &t_args[i]) != 0)
         {
             fprintf(stderr, "Error: thread number %d failed to create: %s\n", i, strerror(errno));
+            pthread_mutex_lock(&global_m);
             threads_num--; // Try to work with one less thread if failed to create.
+            pthread_mutex_unlock(&global_m);
             if(threads_num == 0)
             {
                 fprintf(stderr, "Error: no thread managed to be created, aborting server creation.\n");
@@ -241,31 +244,41 @@ static int myCeil(double num)
 void* threadDoWork(void* args)
 {
     ConnectionStruct res = NULL;
-    ThreadArgs t_args = *((ThreadArgs*)args);
+    ThreadArgs *t_args = ((ThreadArgs*)args);
+    ThreadStats t_stats = (ThreadStats)malloc(sizeof(*t_stats));
+    if(!t_stats)
+    {
+        fprintf(stderr, "Error: failed to allocate thread stats for thread %d: %s\nClosing thread.\n", t_args->thread_id, strerror(errno));
+        pthread_exit(NULL);
+    }
+    
+    // Initialize thread stats:
+    t_stats->thread_id = t_args->thread_id;
+    t_stats->thread_count = t_stats->thread_static = t_stats->thread_dynamic = 0;
+
     while(1)
     {
         pthread_mutex_lock(&global_m);
-        while(connGetSize(t_args.to_do_list) == 0)
+        while(connGetSize(t_args->to_do_list) == 0)
         {
             pthread_cond_wait(&cond, &global_m);
         }
         // <CRITICAL>
         // Pull the request from the to do list:
-        res = connGetFirst(t_args.to_do_list);
-        connPopHead(t_args.to_do_list, false);
+        res = connGetFirst(t_args->to_do_list);
+        connPopHead(t_args->to_do_list, false);
         // Push the request to the busy list, embedded with the dispatch time:
         gettimeofday(&(res->dispatch), NULL); // This function is obsolete, better to use clock_gettime instead.
-        connPushHead(t_args.busy_list, res);
+        connPushHead(t_args->busy_list, res);
         // <CRITICAL-END>
         pthread_mutex_unlock(&global_m);
 
-        requestHandle(res->connfd); // PROCESS THE REQUEST.
+        requestHandle(res, t_stats); // PROCESS THE REQUEST.
         Close(res->connfd);
-        // TODO: Add statistics processing.
         
         pthread_mutex_lock(&global_m);
         // <CRITICAL>
-        connRemoveById(t_args.busy_list, res->job_id);
+        connRemoveById(t_args->busy_list, res->job_id);
         pthread_cond_signal(&cond_policy);
         // <CRITICAL-END>
         pthread_mutex_unlock(&global_m);
@@ -292,6 +305,7 @@ void dhPolicy(ConnectionList to_do_list, ConnectionList busy_list, int q_size, i
         *skip_full_flag = true;
         return;
     }
+    Close(connGetLast(to_do_list)->connfd);
     connPopTail(to_do_list, true);
 }
 
@@ -306,6 +320,7 @@ void randomPolicy(ConnectionList to_do_list, ConnectionList busy_list, int q_siz
 {
     int size = connGetSize(to_do_list);
     int to_remove = myCeil((double)size/4);
+    ConnectionStruct tmp = NULL;
     
     if(size == 0)
     {
@@ -319,7 +334,9 @@ void randomPolicy(ConnectionList to_do_list, ConnectionList busy_list, int q_siz
     while(to_remove)
     {
         rand_index = randInt(size-1);
-        job_id = connGetIthElement(to_do_list, rand_index)->job_id;
+        tmp = connGetIthElement(to_do_list, rand_index);
+        job_id = tmp->job_id;
+        Close(tmp->connfd);
         connRemoveById(to_do_list, job_id);
         size--;
         to_remove--;
