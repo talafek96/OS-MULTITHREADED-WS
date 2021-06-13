@@ -40,15 +40,15 @@ ConnectionList connCreateList()
     c_node tail = malloc(sizeof(*tail));
     if(!list || !head || !tail)
     {
-        if(list)
+        if(!list)
         {
             free(list);
         }
-        if(head)
+        if(!head)
         {
             free(head);
         }
-        if(tail)
+        if(!tail)
         {
             free(tail);
         }
