@@ -40,12 +40,13 @@ void requestError(ConnectionStruct cd, ThreadStats t_stats, char *cause, char *e
     Rio_writen(cd->connfd, buf, strlen(buf));
     printf("%s", buf);
 
-    sprintf(buf, STAT_REQ_ARRIVAL "%u.%06lu\r\n", (unsigned)cd->arrival.tv_sec, cd->arrival.tv_usec/1000);
+    sprintf(buf, STAT_REQ_ARRIVAL "%lu.%06lu\r\n", (unsigned long)cd->arrival.tv_sec, cd->arrival.tv_usec);
     Rio_writen(cd->connfd, buf, strlen(buf));
     printf("%s", buf);
 
-    unsigned long diff_time = ((cd->dispatch.tv_sec * 1000) + cd->dispatch.tv_usec / 1000) - ((cd->arrival.tv_sec * 1000) + cd->arrival.tv_usec / 1000); // in miliseconds
-    sprintf(buf, STAT_REQ_ARRIVAL "%lu.%06lu\r\n", (diff_time / 1000), (diff_time % 1000));
+    unsigned long diff_time = ((cd->dispatch.tv_sec * 1000000) + cd->dispatch.tv_usec % 1000000) \
+                            - ((cd->arrival.tv_sec * 1000000) + cd->arrival.tv_usec % 1000000); // in miliseconds
+    sprintf(buf, STAT_REQ_DISPATCH "%lu.%06lu\r\n", (diff_time / 1000000), (diff_time % 1000000));
     Rio_writen(cd->connfd, buf, strlen(buf));
     printf("%s", buf);
 
@@ -149,19 +150,20 @@ void requestServeDynamic(ConnectionStruct cd, ThreadStats t_stats, char *filenam
 
     // The server does only a little bit of the header.
     // The CGI script has to finish writing out the header.
-    unsigned long diff_time = ((cd->dispatch.tv_sec * 1000) + cd->dispatch.tv_usec / 1000) \
-                            - ((cd->arrival.tv_sec * 1000) + cd->arrival.tv_usec / 1000); // in miliseconds
+    unsigned long diff_time = ((cd->dispatch.tv_sec * 1000000) + cd->dispatch.tv_usec % 1000000) \
+                            - ((cd->arrival.tv_sec * 1000000) + cd->arrival.tv_usec % 1000000); // in miliseconds
     sprintf(buf, "HTTP/1.0 200 OK\r\n");
     sprintf(buf, "%sServer: OS-HW3 Web Server\r\n", buf);
-    sprintf(buf, "%s" STAT_REQ_ARRIVAL "%u.%06lu\r\n", buf, (unsigned)cd->arrival.tv_sec, cd->arrival.tv_usec/1000);
-    sprintf(buf, "%s" STAT_REQ_DISPATCH "%lu.%06lu\r\n", buf, (diff_time / 1000), (diff_time % 1000));
+    sprintf(buf, "%s" STAT_REQ_ARRIVAL "%lu.%06lu\r\n", buf, (long unsigned)cd->arrival.tv_sec, cd->arrival.tv_usec);
+    sprintf(buf, "%s" STAT_REQ_DISPATCH "%lu.%06lu\r\n", buf, (diff_time / 1000000), (diff_time % 1000000));
     sprintf(buf, "%s" STAT_THREAD_ID "%d\r\n", buf, t_stats->thread_id);
     sprintf(buf, "%s" STAT_THREAD_COUNT "%d\r\n", buf, ++t_stats->thread_count);
     sprintf(buf, "%s" STAT_THREAD_STATIC "%d\r\n", buf, t_stats->thread_static);
-    sprintf(buf, "%s" STAT_THREAD_DYNAMIC "%d\r\n\r\n", buf, ++t_stats->thread_dynamic);
+    sprintf(buf, "%s" STAT_THREAD_DYNAMIC "%d\r\n", buf, ++t_stats->thread_dynamic);
     Rio_writen(cd->connfd, buf, strlen(buf));
 
-    if (Fork() == 0)
+    pid_t to_wait = -1;
+    if ((to_wait = Fork()) == 0)
     {
         /* Child process */
         Setenv("QUERY_STRING", cgiargs, 1);
@@ -169,7 +171,7 @@ void requestServeDynamic(ConnectionStruct cd, ThreadStats t_stats, char *filenam
         Dup2(cd->connfd, STDOUT_FILENO);
         Execve(filename, emptylist, environ);
     }
-    Wait(NULL);
+    WaitPid(to_wait, NULL, 0);
 }
 
 void requestServeStatic(ConnectionStruct cd, ThreadStats t_stats, char *filename, int filesize)
@@ -183,17 +185,18 @@ void requestServeStatic(ConnectionStruct cd, ThreadStats t_stats, char *filename
 
     // Rather than call read() to read the file into memory,
     // which would require that we allocate a buffer, we memory-map the file
-    srcp = Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);
+    srcp = (char *)Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);
     Close(srcfd);
 
     // put together response
-    unsigned long diff_time = ((cd->dispatch.tv_sec * 1000) + cd->dispatch.tv_usec / 1000) - ((cd->arrival.tv_sec * 1000) + cd->arrival.tv_usec / 1000); // in miliseconds
+    unsigned long diff_time = ((cd->dispatch.tv_sec * 1000000) + cd->dispatch.tv_usec % 1000000) \
+                            - ((cd->arrival.tv_sec * 1000000) + cd->arrival.tv_usec % 1000000); // in miliseconds
     sprintf(buf, "HTTP/1.0 200 OK\r\n");
     sprintf(buf, "%sServer: OS-HW3 Web Server\r\n", buf);
     sprintf(buf, "%sContent-Length: %d\r\n", buf, filesize);
     sprintf(buf, "%sContent-Type: %s\r\n", buf, filetype);
-    sprintf(buf, "%s" STAT_REQ_ARRIVAL "%u.%06lu\r\n", buf, (unsigned)cd->arrival.tv_sec, cd->arrival.tv_usec/1000);
-    sprintf(buf, "%s" STAT_REQ_DISPATCH "%lu.%06lu\r\n", buf, (diff_time / 1000), (diff_time % 1000));
+    sprintf(buf, "%s" STAT_REQ_ARRIVAL "%u.%06lu\r\n", buf, (unsigned)cd->arrival.tv_sec, cd->arrival.tv_usec);
+    sprintf(buf, "%s" STAT_REQ_DISPATCH "%lu.%06lu\r\n", buf, (diff_time / 1000000), (diff_time % 1000000));
     sprintf(buf, "%s" STAT_THREAD_ID "%d\r\n", buf, t_stats->thread_id);
     sprintf(buf, "%s" STAT_THREAD_COUNT "%d\r\n", buf, ++t_stats->thread_count);
     sprintf(buf, "%s" STAT_THREAD_STATIC "%d\r\n", buf, ++t_stats->thread_static);
