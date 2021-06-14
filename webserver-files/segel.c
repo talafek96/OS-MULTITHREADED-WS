@@ -233,6 +233,13 @@ void Connect(int sockfd, struct sockaddr *serv_addr, int addrlen)
         unix_error("Connect error");
 }
 
+pid_t WaitPid(pid_t pid, int *status, int options)
+{
+    if((pid = waitpid(pid, status, options)) < 0)
+        unix_error("Wait error");
+    return pid;
+}
+
 /************************
  * DNS interface wrappers 
  ***********************/
