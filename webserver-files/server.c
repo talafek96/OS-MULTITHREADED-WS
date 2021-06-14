@@ -4,6 +4,7 @@
 
 #define MIN_PORT 1025
 #define POLICY_POS 4
+#define CURRENTLY_DEBUGGING 0
 
 // 
 // server.c: A very, very simple web server
@@ -33,10 +34,10 @@ typedef struct thread_args
 
 void checkValidity(int port, int threads_num, int queue_size, char *argv[]);
 void* threadDoWork(void* args);
-void blockPolicy(ConnectionList to_do_list, ConnectionList busy_list, int q_size, int connfd, bool* skip_full_flag);
-void dhPolicy(ConnectionList to_do_list, ConnectionList busy_list, int q_size, int connfd, bool* skip_full_flag);
-void dtPolicy(ConnectionList to_do_list, ConnectionList busy_list, int q_size, int connfd, bool* skip_full_flag);
-void randomPolicy(ConnectionList to_do_list, ConnectionList busy_list, int q_size, int connfd, bool* skip_full_flag);
+void blockPolicy(ConnectionList to_do_list, ConnectionList busy_list, int q_size, ConnectionStruct cd, bool* skip_full_flag);
+void dhPolicy(ConnectionList to_do_list, ConnectionList busy_list, int q_size, ConnectionStruct cd, bool* skip_full_flag);
+void dtPolicy(ConnectionList to_do_list, ConnectionList busy_list, int q_size, ConnectionStruct cd, bool* skip_full_flag);
+void randomPolicy(ConnectionList to_do_list, ConnectionList busy_list, int q_size, ConnectionStruct cd, bool* skip_full_flag);
 
 static int randInt(int max);
 static int myCeil(double num);
@@ -87,7 +88,7 @@ int main(int argc, char *argv[])
     // to_do_list: List of requests waiting to be processed by a worker thread (buffer).
     // busy_list:  List of requests currently being worked on by a worker thread.
     ConnectionList to_do_list, busy_list;
-    void (*overloadPolicy)(ConnectionList, ConnectionList, int, int, bool*) = NULL;
+    void (*overloadPolicy)(ConnectionList, ConnectionList, int, ConnectionStruct, bool*) = NULL;
 
     getargs(&port, &threads_num, &q_size, argc, argv);
     checkValidity(port, threads_num, q_size, argv); // If this fails the server will close.
@@ -108,6 +109,7 @@ int main(int argc, char *argv[])
     else if(!strcmp(argv[POLICY_POS], "random"))
     {
         overloadPolicy = randomPolicy;
+        skip_flag = true;
     }
     
     // Initialize locks and condition variables:
@@ -199,7 +201,7 @@ int main(int argc, char *argv[])
         // Make sure there is enough space in the to_do_list:
         if(connGetSize(to_do_list) + connGetSize(busy_list) + 1 > q_size)
         {
-            overloadPolicy(to_do_list, busy_list, q_size, connfd, &skip_full_flag);
+            overloadPolicy(to_do_list, busy_list, q_size, cd, &skip_full_flag);
             if(skip_flag || skip_full_flag)
             {
                 // <CRITICAL-END>
@@ -213,6 +215,7 @@ int main(int argc, char *argv[])
         if(res == CONNECTION_OUT_OF_MEMORY)
         {
             fprintf(stderr, "Error: failed pushing the request into queue: allocation fail\n");
+            Close(connfd);
             free(cd);
             continue;
         }
@@ -288,49 +291,99 @@ void* threadDoWork(void* args)
 }
 
 // ***** Block Policy ***** //
-void blockPolicy(ConnectionList to_do_list, ConnectionList busy_list, int q_size, int connfd, bool* skip_full_flag)
+void blockPolicy(ConnectionList to_do_list, ConnectionList busy_list, int q_size, ConnectionStruct cd, bool* skip_full_flag)
 {
+    #if CURRENTLY_DEBUGGING == 1
+        printf("Block policy entry -->\n");
+    #endif
+
     while(connGetSize(to_do_list) + connGetSize(busy_list) + 1 > q_size)
     {
         pthread_cond_wait(&cond_policy, &global_m);
     }
+
+    #if CURRENTLY_DEBUGGING == 1
+        printf("<-- Block policy exit\n");
+    #endif
 }
 
 // ****** DH Policy ****** //
-void dhPolicy(ConnectionList to_do_list, ConnectionList busy_list, int q_size, int connfd, bool* skip_full_flag)
+void dhPolicy(ConnectionList to_do_list, ConnectionList busy_list, int q_size, ConnectionStruct cd, bool* skip_full_flag)
 {
+    #if CURRENTLY_DEBUGGING == 1
+        printf("DH policy entry -->\n");
+    #endif
     if(connGetSize(to_do_list) == 0)
     {
-        Close(connfd);
+        #if CURRENTLY_DEBUGGING == 1
+            printf("<-- DH policy exit (dropped current request)\n");
+        #endif
+
+        Close(cd->connfd);
+        free(cd);
         *skip_full_flag = true;
         return;
     }
     Close(connGetLast(to_do_list)->connfd);
     connPopTail(to_do_list, true);
+
+    #if CURRENTLY_DEBUGGING == 1
+        printf("<-- DH policy exit (dropped oldest request)\n");
+    #endif
 }
 
 // ****** DT Policy ****** //
-void dtPolicy(ConnectionList to_do_list, ConnectionList busy_list, int q_size, int connfd, bool* skip_full_flag)
+void dtPolicy(ConnectionList to_do_list, ConnectionList busy_list, int q_size, ConnectionStruct cd, bool* skip_full_flag)
 {
-    Close(connfd);   
+    #if CURRENTLY_DEBUGGING == 1
+        printf("DT policy entry -->\n");
+    #endif
+
+    Close(cd->connfd);
+    free(cd);
+
+    #if CURRENTLY_DEBUGGING == 1
+        printf("<-- DT policy exit (dropped current request)\n");
+    #endif
 }
 
 // **** Random Policy **** //
-void randomPolicy(ConnectionList to_do_list, ConnectionList busy_list, int q_size, int connfd, bool* skip_full_flag)
+void randomPolicy(ConnectionList to_do_list, ConnectionList busy_list, int q_size, ConnectionStruct cd, bool* skip_full_flag)
 {
+    #if CURRENTLY_DEBUGGING == 1
+        printf("RANDOM policy entry -->\n");
+    #endif
+
+    ConnectionRes res = connPushTail(to_do_list, cd);
+    if(res == CONNECTION_OUT_OF_MEMORY)
+    {
+        fprintf(stderr, "Error: failed pushing the request into queue: allocation fail\n");
+        Close(cd->connfd);
+        free(cd);
+        return;
+    }
+
     int size = connGetSize(to_do_list);
     int to_remove = myCeil((double)size/4);
     ConnectionStruct tmp = NULL;
     
-    if(size == 0)
+    if(size == 1)
     {
-        Close(connfd);
-        *skip_full_flag = true;
+        #if CURRENTLY_DEBUGGING == 1
+            printf("<-- RANDOM policy exit\n");
+        #endif
+
+        Close(cd->connfd);
         return;
     }
 
     int rand_index = 0;
     int job_id = -1;
+
+    #if CURRENTLY_DEBUGGING == 1
+        printf("RANDOM: %d/%d to remove\n", to_remove, size);
+    #endif
+
     while(to_remove)
     {
         rand_index = randInt(size-1);
@@ -340,6 +393,14 @@ void randomPolicy(ConnectionList to_do_list, ConnectionList busy_list, int q_siz
         connRemoveById(to_do_list, job_id);
         size--;
         to_remove--;
+
+        #if CURRENTLY_DEBUGGING == 1
+            printf("RANDOM: index %d removed (%d left)\n", rand_index, to_remove);
+        #endif
     }
+
+    #if CURRENTLY_DEBUGGING == 1
+        printf("<-- RANDOM policy exit\n");
+    #endif
 }
 // *********************** //
