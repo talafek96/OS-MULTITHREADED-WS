@@ -292,7 +292,7 @@ ConnectionStruct connGetIthElement(ConnectionList list, int index)
     assert(list->size >= 0);
     #endif
 
-    if(index + 1 >= list->size)
+    if(index + 1 > list->size)
     {
         return NULL;
     }
