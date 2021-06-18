@@ -109,7 +109,6 @@ int main(int argc, char *argv[])
     else if(!strcmp(argv[POLICY_POS], "random"))
     {
         overloadPolicy = randomPolicy;
-        skip_flag = true;
     }
     
     // Initialize locks and condition variables:
@@ -354,20 +353,11 @@ void randomPolicy(ConnectionList to_do_list, ConnectionList busy_list, int q_siz
         printf("RANDOM policy entry -->\n");
     #endif
 
-    ConnectionRes res = connPushTail(to_do_list, cd);
-    if(res == CONNECTION_OUT_OF_MEMORY)
-    {
-        fprintf(stderr, "Error: failed pushing the request into queue: allocation fail\n");
-        Close(cd->connfd);
-        free(cd);
-        return;
-    }
-
     int size = connGetSize(to_do_list);
     int to_remove = myCeil((double)size/4);
     ConnectionStruct tmp = NULL;
     
-    if(size == 1)
+    if(size == 0)
     {
         #if CURRENTLY_DEBUGGING == 1
             printf("<-- RANDOM policy exit\n");
