@@ -187,7 +187,7 @@ void requestServeStatic(ConnectionStruct cd, ThreadStats t_stats, char *filename
     // which would require that we allocate a buffer, we memory-map the file
     srcp = (char *)Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);
     Close(srcfd);
-
+    
     // put together response
     unsigned long diff_time = ((cd->dispatch.tv_sec * 1000000) + cd->dispatch.tv_usec % 1000000) \
                             - ((cd->arrival.tv_sec * 1000000) + cd->arrival.tv_usec % 1000000); // in miliseconds
@@ -195,7 +195,7 @@ void requestServeStatic(ConnectionStruct cd, ThreadStats t_stats, char *filename
     sprintf(buf, "%sServer: OS-HW3 Web Server\r\n", buf);
     sprintf(buf, "%sContent-Length: %d\r\n", buf, filesize);
     sprintf(buf, "%sContent-Type: %s\r\n", buf, filetype);
-    sprintf(buf, "%s" STAT_REQ_ARRIVAL "%u.%06lu\r\n", buf, (unsigned)cd->arrival.tv_sec, cd->arrival.tv_usec);
+    sprintf(buf, "%s" STAT_REQ_ARRIVAL "%lu.%06lu\r\n", buf, (long unsigned)cd->arrival.tv_sec, cd->arrival.tv_usec);
     sprintf(buf, "%s" STAT_REQ_DISPATCH "%lu.%06lu\r\n", buf, (diff_time / 1000000), (diff_time % 1000000));
     sprintf(buf, "%s" STAT_THREAD_ID "%d\r\n", buf, t_stats->thread_id);
     sprintf(buf, "%s" STAT_THREAD_COUNT "%d\r\n", buf, ++t_stats->thread_count);
