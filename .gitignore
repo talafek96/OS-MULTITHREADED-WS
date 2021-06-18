@@ -16,6 +16,7 @@ webserver-files/output.cgi
 webserver-files/public/
 webserv-singlethreaded/*.o
 webserv-singlethreaded/public/
+webserver-files/modified_test_with_setup
 .vscode/settings.json
 *.json
 /build/
