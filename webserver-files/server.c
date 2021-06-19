@@ -364,6 +364,8 @@ void randomPolicy(ConnectionList to_do_list, ConnectionList busy_list, int q_siz
         #endif
 
         Close(cd->connfd);
+        free(cd);
+        *skip_full_flag = true;
         return;
     }
 
